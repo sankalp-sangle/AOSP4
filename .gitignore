@@ -1,2 +1,10 @@
 build/
 *.swp
+*.txt
+Makefile
+*.o
+*.make
+*.cmake
+*.a
+*.json
+*.yml

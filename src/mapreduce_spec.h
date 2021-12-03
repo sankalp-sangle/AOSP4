@@ -47,6 +47,7 @@ inline void helperPrint(MapReduceSpec spec) {
 	cout << "Number of output files: " << spec.n_output_files << endl;
 	cout << "Map KiloBytes: " << spec.map_kilobytes << endl;
 	cout << "User ID: " << spec.user_id << endl;
+	cout << "-----------------------------------" << endl;
 }
 
 
