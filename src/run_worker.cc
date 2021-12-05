@@ -12,5 +12,6 @@ int main(int argc, char** argv) {
 		}
 
 	Worker worker(ip_addr_port);
+	cout << "worker main" << endl;
 	return worker.run() ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -8,3 +8,11 @@ Makefile
 *.a
 *.json
 *.yml
+**/CMakeFiles/
+bin/
+**/.DS_Store
+.vscode/
+.devcontainer/
+**/*.pb.cc
+**/*.pb.h
+*.diff

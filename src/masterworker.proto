@@ -1,3 +1,22 @@
 syntax = "proto3";
 
 package masterworker;
+
+service WorkerService {
+    rpc assignTask (WorkerQuery) returns (WorkerResponse){}
+}
+
+message WorkerQuery{
+    string type = 1;
+    repeated WorkerShard shards = 2;
+}
+
+message WorkerShard{
+    string path = 1;
+    int32 start = 2;
+    int32 end = 3;
+}
+
+message WorkerResponse{
+    int32 status = 1;
+}
