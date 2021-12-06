@@ -107,10 +107,28 @@ bool Master::run() {
 	// was successful. Tag the request with the integer 1.
 	rpc -> Finish( & reply, & status, (void * ) 1);
 
-	cout << status.error_details() << endl;
+	void* got_tag;
+	bool ok = false;
+	// Block until the next result is available in the completion queue "cq".
+	// The return value of Next should always be checked. This return value
+	// tells us whether there is any kind of event or the cq_ is shutting down.
+	GPR_ASSERT(cq.Next(&got_tag, &ok));
 
-	if(debug_level > 1)
-		cout << "getProductBid rpc async done" << endl;
+	// Verify that the result from "cq" corresponds, by its tag, our previous
+	// request.
+	GPR_ASSERT(got_tag == (void * ) 1);
+	GPR_ASSERT(ok);
+
+	// Act upon the status of the actual RPC.
+	if (status.ok()) {
+		// Success
+		if(debug_level > 1)
+			cout << "Master run rpc success" << endl;
+	} else {
+		// Error
+		if(debug_level > 1)
+			cout << "Master run rpc error" << endl;
+	}
 	
 	return true;
 }
