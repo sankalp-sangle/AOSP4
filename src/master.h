@@ -87,7 +87,7 @@ bool Master::map(){
 	// Data we are sending to the server.
 	WorkerQuery query;
 	query.set_userid("cs6210");
-	query.set_type("MAP");
+	query.set_type("REDUCE");
 
 	// Container for the data we expect from the server.
 	WorkerResponse reply;

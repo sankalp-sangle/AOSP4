@@ -93,7 +93,7 @@ private:
 				ifstream file(path, ios::in);
 
 				if(!file.is_open())
-					cout << "Unable to open file\n";
+					cout << "HandleMap cant open file" << endl;
 				else {
 					file.seekg(start, file.beg);
 
@@ -112,16 +112,55 @@ private:
 
 			response_.set_status(1);
 
+			// Still have to write stuff to file
+
 			if(debug_level > 1)
 				cout << "HandleMap end" << endl;
 		}
 
 		void handleReduce(){
 			if(debug_level > 1)
-				cout << "HandleMap start" << endl;
+				cout << "HandleReduce start" << endl;
+
+
+			auto reducer = get_reducer_from_task_factory(request_.userid());
+			reducer->impl_->output_dir = request_.output();
+
+			int index = request_.shards(0).path().find('.');
+			reducer->impl_->output_file = "FINAL_" + request_.shards(0).path().substr(index-1, index);
 
 			if(debug_level > 1)
-				cout << "HandleMap end" << endl;
+				cout << "HandleReduce reducer received." << endl;
+
+			unordered_map<string, vector<string>> data;
+
+			for(auto entry : request_.shards()) {
+				string entry_path = entry.path();
+
+				if(debug_level > 1)
+					cout << "HandleReduce entry process " << entry_path << endl;
+
+				ifstream entry_file(entry_path, ios::in);
+
+				if(!entry_file.is_open())
+					cout << "HandleReduce no intermediate file" << endl;
+				else {
+					string tmp;
+					while(getline(entry_file, tmp))
+						data[tmp.substr(0, tmp.find(' '))].push_back(tmp.substr(tmp.find(' ') + 1, tmp.length()));
+				}
+			}
+
+			if(debug_level > 1)
+				cout << "HandleReduce read entries" << endl;
+
+			for(auto entry : data)
+				reducer->reduce(entry.first, entry.second);
+
+			response_.set_status(1);
+
+			if(debug_level > 1)
+				cout << "HandleReduce end" << endl;
 		}
 
 		void Proceed() {
