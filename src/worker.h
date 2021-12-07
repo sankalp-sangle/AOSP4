@@ -24,9 +24,13 @@ using grpc::Status;
 
 using masterworker::WorkerService;
 using masterworker::WorkerQuery;
+using masterworker::WorkerShard;
 using masterworker::WorkerResponse;
 
 static int debug_level = 2;
+
+extern std::shared_ptr<BaseMapper> get_mapper_from_task_factory(const std::string& user_id);
+extern std::shared_ptr<BaseReducer> get_reducer_from_task_factory(const std::string& user_id);
 
 /* CS6210_TASK: Handle all the task a Worker is supposed to do.
 	This is a big task for this project, will test your understanding of map reduce */
@@ -54,10 +58,71 @@ private:
         // Take in the "service" instance (in this case representing an asynchronous
         // server) and the completion queue "cq" used for asynchronous communication
         // with the gRPC runtime.
-        CallData(WorkerService::AsyncService* service, ServerCompletionQueue* cq): service_(service), cq_(cq), responder_( & ctx_), status_(CREATE) {
+        CallData(WorkerService::AsyncService* service, ServerCompletionQueue* cq)
+			: service_(service), cq_(cq), responder_( & ctx_), status_(CREATE) {
             // Invoke the serving logic right away.
             Proceed();
         }
+
+		void handleMap(){
+			if(debug_level > 1)
+				cout << "HandleMap start" << endl;
+
+			// Get the mapper first
+			auto mapper = get_mapper_from_task_factory(request_.userid());
+			mapper->impl_->n_reducers = request_.n();
+			mapper->impl_->output_dir = request_.output();
+
+			if(debug_level > 1)
+				cout << "HandleMap mapper received" << endl;
+
+			for(int i = 0; i < request_.shards().size(); i++) {
+				if(debug_level > 1)
+					cout << "HandleMap shard start" << endl;
+
+				WorkerShard shard = request_.shards(i);
+
+				string path = shard.path();
+				int start = shard.start();
+				int end = shard.end();
+
+				
+				if(debug_level > 1)
+					cout << "HandleMap shard " << path << " " << start << " " << end << endl;
+
+				ifstream file(path, ios::in);
+
+				if(!file.is_open())
+					cout << "Unable to open file\n";
+				else {
+					file.seekg(start, file.beg);
+
+					string tmp;
+					while(file.tellg() <= end && file.tellg() != -1) {
+						getline(file, tmp);
+						mapper->map(tmp);
+					}
+				}
+
+				file.close();
+
+				if(debug_level > 1)
+					cout << "HandleMap shard end" << endl;
+			}
+
+			response_.set_status(1);
+
+			if(debug_level > 1)
+				cout << "HandleMap end" << endl;
+		}
+
+		void handleReduce(){
+			if(debug_level > 1)
+				cout << "HandleMap start" << endl;
+
+			if(debug_level > 1)
+				cout << "HandleMap end" << endl;
+		}
 
 		void Proceed() {
 			if (status_ == CREATE) {
@@ -69,8 +134,7 @@ private:
 				// the tag uniquely identifying the request (so that different CallData
 				// instances can serve different requests concurrently), in this case
 				// the memory address of this CallData instance.
-				service_ -> RequestassignTask( & ctx_, & request_, & responder_, cq_, cq_,
-					this);
+				service_ -> RequestassignTask( & ctx_, & request_, & responder_, cq_, cq_, this);
 			} else if (status_ == PROCESS) {
 				if(debug_level > 1)
 					cout << "Proceed start" << endl;
@@ -82,17 +146,22 @@ private:
 
 				if(debug_level > 1){
 					cout << "Proceed after calldata" << endl;
-					cout << "Request received with type " << request_.type() << endl;
+					cout << "Proceed request received with type " << request_.type() << endl;
 				}
+
+				if(request_.type() == "MAP")
+					handleMap();
+				else if(request_.type() == "REDUCE")
+					handleReduce();
 
 				// And we are done! Let the gRPC runtime know we've finished, using the
 				// memory address of this instance as the uniquely identifying tag for
 				// the event.
-				if(debug_level > 1)
-					cout << "Proceed end\n" << endl;
-				
 				status_ = FINISH;
-				responder_.Finish(reply_, Status::OK, this);
+				responder_.Finish(response_, Status::OK, this);
+
+				if(debug_level > 1)
+					cout << "Proceed end" << endl;
 			} else {
 				GPR_ASSERT(status_ == FINISH);
 				// Once in the FINISH state, deallocate ourselves (CallData).
@@ -114,7 +183,7 @@ private:
 		// What we get from the client.
 		WorkerQuery request_;
 		// What we send back to the client.
-		WorkerResponse reply_;
+		WorkerResponse response_;
 
 		// The means to get back to the client.
 		ServerAsyncResponseWriter < WorkerResponse > responder_;
@@ -181,7 +250,7 @@ Worker::Worker(string ip_addr_port) {
 	// Finally assemble the server.
 	server_ = builder.BuildAndStart();
 
-	cout << " Worker server listening on " << server_address << endl;
+	cout << "Worker server listening on " << server_address << endl;
 
 	// Proceed to the server's main loop.
 	// HandleRpcs();
@@ -194,9 +263,6 @@ Worker::~Worker(){
 
 	cout << "Shutting down worker" << endl;
 }
-
-extern std::shared_ptr<BaseMapper> get_mapper_from_task_factory(const std::string& user_id);
-extern std::shared_ptr<BaseReducer> get_reducer_from_task_factory(const std::string& user_id);
 
 /* CS6210_TASK: Here you go. once this function is called your woker's job is to keep looking for new tasks 
 	from Master, complete when given one and again keep looking for the next one.

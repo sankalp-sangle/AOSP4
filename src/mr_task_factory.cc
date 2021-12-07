@@ -6,6 +6,7 @@
 #include "mr_tasks.h"
 #include <mr_task_factory.h>
 
+using namespace std;
 
 BaseMapper::BaseMapper() : impl_(new BaseMapperInternal) {}
 

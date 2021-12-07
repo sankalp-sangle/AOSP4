@@ -18,6 +18,7 @@ struct BaseMapperInternal {
 
 		/* NOW you can add below, data members and member functions as per the need of your implementation*/
 		int n_reducers;
+		string output_dir;
 };
 
 

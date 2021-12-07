@@ -1,5 +1,7 @@
 #pragma once
 
+#include <bits/stdc++.h>
+
 #include <grpc/support/log.h>
 #include <grpcpp/grpcpp.h>
 
@@ -43,30 +45,49 @@ private:
 	/* NOW you can add below, data members and member functions as per the need of your implementation*/
 	MapReduceSpec mr_spec_;
 	vector<FileShard> file_shards_;
+	vector<bool> shard_assigned;
+
+	int n_shards;
+	int n_workers;
+
+	unordered_map<string, FileShard> shard_mapping;
+	unordered_map<string, unique_ptr < WorkerService::Stub > > stub_mapping;
+
+	bool map();
+	bool reduce();
 };
 
 
 /* CS6210_TASK: This is all the information your master will get from the framework.
 	You can populate your other class data members here if you want */
-Master::Master(const MapReduceSpec& mr_spec, const vector<FileShard>& file_shards) {
+Master::Master(const MapReduceSpec& mr_spec, const vector<FileShard>& file_shards): shard_assigned(file_shards.size(), false) {
 	mr_spec_ = mr_spec;
 	file_shards_ = file_shards;
+
+	n_shards = file_shards.size();
+	n_workers = file_shards.size();
+
+	// create stubs
+	for(auto workerIP : mr_spec.worker_IPs){
+		shared_ptr < Channel > channel = grpc::CreateChannel(workerIP, grpc::InsecureChannelCredentials());
+		stub_mapping[workerIP] = WorkerService::NewStub(channel);
+	}
 }
 
 
 /* CS6210_TASK: Here you go. once this function is called you will complete whole map reduce task and return true if succeeded */
 bool Master::run() {
-	cout << mr_spec_.worker_IPs[0] << endl;
+	return map() && reduce();	
+}
 
-	shared_ptr < Channel > channel = grpc::CreateChannel(mr_spec_.worker_IPs[0], grpc::InsecureChannelCredentials());
-    unique_ptr < WorkerService::Stub > stub_ = WorkerService::NewStub(channel);
-
+bool Master::map(){
 	if(debug_level > 1)
-		cout << "getProductBid start" << endl;
+		cout << "Map start" << endl;
 
 	// Data we are sending to the server.
 	WorkerQuery query;
-	query.set_type("TEST");
+	query.set_userid("cs6210");
+	query.set_type("MAP");
 
 	// Container for the data we expect from the server.
 	WorkerResponse reply;
@@ -79,7 +100,7 @@ bool Master::run() {
 	Status status;
 
 	if(debug_level > 1)
-		cout << "Master run start" << endl;
+		cout << "Map run start" << endl;
 
 	// Since a stub is of type unique pointer, no copy can be created for this.
 	// Hence we cannot use index based iterator or every auto based iterators
@@ -97,7 +118,7 @@ bool Master::run() {
 	// Because we are using the asynchronous API, we need to hold on to
 	// the "call" instance in order to get updates on the ongoing RPC.
 	std::unique_ptr < ClientAsyncResponseReader < WorkerResponse > > rpc(
-		stub_ -> PrepareAsyncassignTask( & context, query, & cq));
+		stub_mapping["localhost:50051"] -> PrepareAsyncassignTask( & context, query, & cq));
 
 	// StartCall initiates the RPC call
 	rpc -> StartCall();
@@ -124,11 +145,15 @@ bool Master::run() {
 		// Success
 		if(debug_level > 1)
 			cout << "Master run rpc success" << endl;
+		return true;
 	} else {
 		// Error
 		if(debug_level > 1)
 			cout << "Master run rpc error" << endl;
+		return false;
 	}
-	
+}
+
+bool Master::reduce(){
 	return true;
 }
