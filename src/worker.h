@@ -58,15 +58,15 @@ private:
         // Take in the "service" instance (in this case representing an asynchronous
         // server) and the completion queue "cq" used for asynchronous communication
         // with the gRPC runtime.
-        CallData(WorkerService::AsyncService* service, ServerCompletionQueue* cq)
-			: service_(service), cq_(cq), responder_( & ctx_), status_(CREATE) {
+        CallData(WorkerService::AsyncService* service, ServerCompletionQueue* cq, string server_address)
+			: service_(service), cq_(cq), responder_( & ctx_), status_(CREATE), server_address(server_address) {
             // Invoke the serving logic right away.
             Proceed();
         }
 
 		void handleMap(){
 			if(debug_level > 1)
-				cout << "HandleMap start" << endl;
+				cout << server_address << " " << "HandleMap start" << endl;
 
 			// Get the mapper first
 			auto mapper = get_mapper_from_task_factory(request_.userid());
@@ -74,11 +74,13 @@ private:
 			mapper->impl_->output_dir = request_.output();
 
 			if(debug_level > 1)
-				cout << "HandleMap mapper received" << endl;
+				cout << server_address << " " << "HandleMap mapper received" << endl;
+
+			int id = request_.workerid();
 
 			for(int i = 0; i < request_.shards().size(); i++) {
 				if(debug_level > 1)
-					cout << "HandleMap shard start" << endl;
+					cout << server_address << " " << "HandleMap shard start" << endl;
 
 				WorkerShard shard = request_.shards(i);
 
@@ -86,14 +88,13 @@ private:
 				int start = shard.start();
 				int end = shard.end();
 
-				
 				if(debug_level > 1)
-					cout << "HandleMap shard " << path << " " << start << " " << end << endl;
+					cout << server_address << " " << "HandleMap shard " << path << " " << start << " " << end << endl;
 
 				ifstream file(path, ios::in);
 
 				if(!file.is_open())
-					cout << "HandleMap cant open file" << endl;
+					cout << server_address << " " << "HandleMap cant open file" << endl;
 				else {
 					file.seekg(start, file.beg);
 
@@ -107,20 +108,21 @@ private:
 				file.close();
 
 				if(debug_level > 1)
-					cout << "HandleMap shard end" << endl;
+					cout << server_address << " " << "HandleMap shard end" << endl;
 			}
 
 			response_.set_status(1);
+			response_.set_id(id);
 
 			// Still have to write stuff to file
 
 			if(debug_level > 1)
-				cout << "HandleMap end" << endl;
+				cout << server_address << " " << "HandleMap end" << endl;
 		}
 
 		void handleReduce(){
 			if(debug_level > 1)
-				cout << "HandleReduce start" << endl;
+				cout << server_address << " " << "HandleReduce start" << endl;
 
 
 			auto reducer = get_reducer_from_task_factory(request_.userid());
@@ -130,7 +132,7 @@ private:
 			reducer->impl_->output_file = "FINAL_" + request_.shards(0).path().substr(index-1, index);
 
 			if(debug_level > 1)
-				cout << "HandleReduce reducer received." << endl;
+				cout << server_address << " " << "HandleReduce reducer received." << endl;
 
 			unordered_map<string, vector<string>> data;
 
@@ -138,12 +140,12 @@ private:
 				string entry_path = entry.path();
 
 				if(debug_level > 1)
-					cout << "HandleReduce entry process " << entry_path << endl;
+					cout << server_address << " " << "HandleReduce entry process " << entry_path << endl;
 
 				ifstream entry_file(entry_path, ios::in);
 
 				if(!entry_file.is_open())
-					cout << "HandleReduce no intermediate file" << endl;
+					cout << server_address << " " << "HandleReduce no intermediate file" << endl;
 				else {
 					string tmp;
 					while(getline(entry_file, tmp))
@@ -152,7 +154,7 @@ private:
 			}
 
 			if(debug_level > 1)
-				cout << "HandleReduce read entries" << endl;
+				cout << server_address << " " << "HandleReduce read entries" << endl;
 
 			for(auto entry : data)
 				reducer->reduce(entry.first, entry.second);
@@ -160,7 +162,7 @@ private:
 			response_.set_status(1);
 
 			if(debug_level > 1)
-				cout << "HandleReduce end" << endl;
+				cout << server_address << " " << "HandleReduce end" << endl;
 		}
 
 		void Proceed() {
@@ -176,16 +178,16 @@ private:
 				service_ -> RequestassignTask( & ctx_, & request_, & responder_, cq_, cq_, this);
 			} else if (status_ == PROCESS) {
 				if(debug_level > 1)
-					cout << "Proceed start" << endl;
+					cout << server_address << " " << "Proceed start" << endl;
 
 				// Spawn a new CallData instance to serve new clients while we process
 				// the one for this CallData. The instance will deallocate itself as
 				// part of its FINISH state.
-				new CallData(service_, cq_);
+				new CallData(service_, cq_, server_address);
 
 				if(debug_level > 1){
-					cout << "Proceed after calldata" << endl;
-					cout << "Proceed request received with type " << request_.type() << endl;
+					cout << server_address << " " << "Proceed after calldata" << endl;
+					cout << server_address << " " << "Proceed request received with type " << request_.type() << endl;
 				}
 
 				if(request_.type() == "MAP")
@@ -200,7 +202,7 @@ private:
 				responder_.Finish(response_, Status::OK, this);
 
 				if(debug_level > 1)
-					cout << "Proceed end" << endl;
+					cout << server_address << " " << "Proceed end" << endl;
 			} else {
 				GPR_ASSERT(status_ == FINISH);
 				// Once in the FINISH state, deallocate ourselves (CallData).
@@ -234,12 +236,14 @@ private:
 			FINISH
 		};
 		CallStatus status_; // The current serving state.
+
+		string server_address;
 	};
 
 	// This can be run in multiple threads if needed.
 	void HandleRpcs() {
 		// Spawn a new CallData instance to serve new clients.
-		new CallData( & service_, cq_.get());
+		new CallData( & service_, cq_.get(), server_address);
 		void * tag; // uniquely identifies a request.
 		bool ok;
 		while (true) {

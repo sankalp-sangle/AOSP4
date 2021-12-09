@@ -12,6 +12,7 @@ message WorkerQuery{
     int32 n = 3; 
     string output = 4;
     repeated WorkerShard shards = 5;
+    int32 workerid = 6;
 }
 
 message WorkerShard{
@@ -21,5 +22,6 @@ message WorkerShard{
 }
 
 message WorkerResponse{
-    int32 status = 1;
+    int32 id = 1;
+    int32 status = 2;
 }

@@ -24,7 +24,7 @@ struct BaseMapperInternal {
 
 /* CS6210_TASK Implement this function */
 inline BaseMapperInternal::BaseMapperInternal() {
-
+	
 }
 
 
