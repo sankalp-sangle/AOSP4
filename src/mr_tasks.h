@@ -17,7 +17,7 @@ struct BaseMapperInternal {
 		void emit(const std::string& key, const std::string& val);
 
 		/* NOW you can add below, data members and member functions as per the need of your implementation*/
-		int n_reducers;
+		int n_output_files;
 		string output_dir;
 };
 
@@ -32,7 +32,7 @@ inline BaseMapperInternal::BaseMapperInternal() {
 inline void BaseMapperInternal::emit(const std::string& key, const std::string& val) {
 	// std::cout << "Dummy emit by BaseMapperInternal: " << key << ", " << val << std::endl;
 	size_t hashed_number = hash<string>{}(key);
-	size_t modded_number = hashed_number % n_reducers;
+	size_t modded_number = hashed_number % n_output_files;
 
 	string intermediate_file = "intermediate/" + to_string(modded_number) + ".txt";
 
@@ -74,7 +74,11 @@ inline BaseReducerInternal::BaseReducerInternal() {
 inline void BaseReducerInternal::emit(const std::string& key, const std::string& val) {
 	// std::cout << "Dummy emit by BaseReducerInternal: " << key << ", " << val << std::endl;
 	ofstream outfile;
-	outfile.open(output_dir + "/" + output_file + ".txt", ios_base::app);
+	// Get filename from output_file
+	size_t last_slash = output_file.find_last_of("/");
+	string output_filename = output_file.substr(last_slash + 1);
+
+	outfile.open(output_dir + "/" + output_filename + ".txt", ios_base::app);
 	outfile << key << " " << val << endl;
 	outfile.close();
 }

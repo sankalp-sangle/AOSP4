@@ -70,7 +70,7 @@ private:
 
 			// Get the mapper first
 			auto mapper = get_mapper_from_task_factory(request_.userid());
-			mapper->impl_->n_reducers = request_.n();
+			mapper->impl_->n_output_files = request_.n();
 			mapper->impl_->output_dir = request_.output();
 
 			if(debug_level > 1)
@@ -124,45 +124,52 @@ private:
 			if(debug_level > 1)
 				cout << server_address << " " << "HandleReduce start" << endl;
 
-
+			// Get the reducer first
 			auto reducer = get_reducer_from_task_factory(request_.userid());
 			reducer->impl_->output_dir = request_.output();
 
-			int index = request_.shards(0).path().find('.');
-			reducer->impl_->output_file = "FINAL_" + request_.shards(0).path().substr(index-1, index);
+			if(request_.shards().size() == 0)
+				return;
+			
+			for(auto shard : request_.shards()) {
+				string path = shard.path();
+				reducer->impl_->output_file = path;
 
-			if(debug_level > 1)
-				cout << server_address << " " << "HandleReduce reducer received." << endl;
-
-			unordered_map<string, vector<string>> data;
-
-			for(auto entry : request_.shards()) {
-				string entry_path = entry.path();
+				unordered_map<string, vector<string>> key_and_counts;
 
 				if(debug_level > 1)
-					cout << server_address << " " << "HandleReduce entry process " << entry_path << endl;
+					cout << server_address << " " << "HandleReduce shard " << path << endl;
 
-				ifstream entry_file(entry_path, ios::in);
+				// Read the file line by line
+				ifstream file(path, ios::in);
 
-				if(!entry_file.is_open())
-					cout << server_address << " " << "HandleReduce no intermediate file" << endl;
+				if(!file.is_open())
+					cout << server_address << " " << "HandleReduce cant open file" << endl;
 				else {
 					string tmp;
-					while(getline(entry_file, tmp))
-						data[tmp.substr(0, tmp.find(' '))].push_back(tmp.substr(tmp.find(' ') + 1, tmp.length()));
+					while(getline(file, tmp)) {
+						// Split tmp into key and value separated by space
+						string key, value;
+						int pos = tmp.find(" ");
+						key = tmp.substr(0, pos);
+						value = tmp.substr(pos + 1);
+						if(key_and_counts.find(key) == key_and_counts.end()) {
+							key_and_counts[key] = vector<string>();
+						}
+						key_and_counts[key].push_back(value);
+					}
+				}
+
+				file.close();
+
+				// For all the keys, call the reducer
+				for(auto key_and_count : key_and_counts) {
+					string key = key_and_count.first;
+					vector<string> counts = key_and_count.second;
+					reducer->reduce(key, counts);
 				}
 			}
 
-			if(debug_level > 1)
-				cout << server_address << " " << "HandleReduce read entries" << endl;
-
-			for(auto entry : data)
-				reducer->reduce(entry.first, entry.second);
-
-			response_.set_status(1);
-
-			if(debug_level > 1)
-				cout << server_address << " " << "HandleReduce end" << endl;
 		}
 
 		void Proceed() {

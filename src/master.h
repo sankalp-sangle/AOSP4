@@ -50,10 +50,12 @@ private:
 
 	int n_shards;
 	int n_workers;
+	int n_output_files;
 
 	unordered_map<string, FileShard> shard_mapping;
 	unordered_map<string, unique_ptr < WorkerService::Stub > > stub_mapping;
 	unordered_map<int, vector<FileInfo>> id_to_shards;
+	unordered_map<int, vector<string>> id_to_intermediate_files;
 
 	bool map();
 	bool reduce();
@@ -68,6 +70,7 @@ Master::Master(const MapReduceSpec& mr_spec, const vector<FileShard>& file_shard
 
 	n_shards = file_shards.size();
 	n_workers = mr_spec_.n_workers;
+	n_output_files = mr_spec_.n_output_files;
 
 	// create stubs
 	for(auto workerIP : mr_spec.worker_IPs){
@@ -82,6 +85,13 @@ Master::Master(const MapReduceSpec& mr_spec, const vector<FileShard>& file_shard
 
 	system("rm -rf intermediate");
 	system("mkdir intermediate");
+
+	string command1 = "rm -rf " + mr_spec_.output_dir;
+	string command2 = "mkdir " + mr_spec_.output_dir;
+
+	system(command1.c_str());
+	system(command2.c_str());
+
 }
 
 
@@ -130,10 +140,9 @@ bool Master::map(){
 		ClientContext context;
 
 		WorkerQuery worker_query;
-		worker_query.set_userid("cs6210");
 		worker_query.set_type("MAP");
 		worker_query.set_userid(mr_spec_.user_id);
-		worker_query.set_n(mr_spec_.n_output_files);
+		worker_query.set_n(n_output_files);
 		worker_query.set_output(mr_spec_.output_dir);
 		worker_query.set_workerid(it->first);
 
@@ -198,5 +207,98 @@ bool Master::map(){
 }
 
 bool Master::reduce(){
+	if(debug_level > 1)
+		cout << "Reduce start" << endl;
+
+	int worker_pointer = 0;
+	for(int i = 0; i < n_output_files; i++) {
+		if(id_to_intermediate_files.find(worker_pointer) == id_to_intermediate_files.end())
+			id_to_intermediate_files[worker_pointer] = vector<string>();
+
+		id_to_intermediate_files[worker_pointer].push_back("intermediate/" + to_string(i) + ".txt");
+		worker_pointer = (worker_pointer + 1) % n_workers;
+	}
+
+	if(debug_level > 1)
+		cout << "Master reduce starting rpc" << endl;
+	
+	// The producer-consumer queue we use to communicate asynchronously with the
+	// gRPC runtime.
+	CompletionQueue cq;
+
+	// Container for the data we expect from the server.
+	WorkerResponse reply;
+	
+	// Storage for the status of the RPC upon completion.
+	Status status;
+
+	for(auto it = id_to_intermediate_files.begin(); it != id_to_intermediate_files.end(); it++) {
+		if(debug_level > 1)
+			cout << "Master reduce map start " << it->first << endl;
+		
+		ClientContext context;
+
+		WorkerQuery worker_query;
+		worker_query.set_type("REDUCE");
+		worker_query.set_userid(mr_spec_.user_id);
+		worker_query.set_n(n_output_files);
+		worker_query.set_output(mr_spec_.output_dir);
+		worker_query.set_workerid(it->first);
+
+		if(debug_level > 1)
+			cout << "Master run reduce created query " << it->first << endl;
+
+		for(auto file : it->second) {
+			WorkerShard* worker_shard = worker_query.add_shards();
+			worker_shard->set_path(file);
+		}
+
+		if(debug_level > 1)
+			cout << "Master run reduce starting rpc " << it->first << endl;
+
+		// stub_->PrepareAsyncSayHello() creates an RPC object, returning
+		// an instance to store in "call" but does not actually start the RPC
+		// Because we are using the asynchronous API, we need to hold on to
+		// the "call" instance in order to get updates on the ongoing RPC.
+		std::unique_ptr < ClientAsyncResponseReader < WorkerResponse > > rpc(
+			stub_mapping[mr_spec_.worker_IPs[it->first]] -> PrepareAsyncassignTask( & context, worker_query, & cq));
+
+		// StartCall initiates the RPC call
+		rpc -> StartCall();
+
+		// Request that, upon completion of the RPC, "reply" be updated with the
+		// server's response; "status" with the indication of whether the operation
+		// was successful. Tag the request with the integer 1.
+		rpc -> Finish( & reply, & status, (void * ) 1);
+
+		if(debug_level > 1)
+			cout << "Master run reduce wait " << it->first << endl;
+	}
+	
+	// Something store here
+	vector<bool> returned(mr_spec_.worker_IPs.size(), false);
+
+	for(auto it = id_to_intermediate_files.begin(); it != id_to_intermediate_files.end(); it++){
+		if(debug_level > 1)
+			cout << "Master run reduce reply wait " << it->first << endl;
+
+		void* got_tag;
+		bool ok = false;
+		// Block until the next result is available in the completion queue "cq".
+		// The return value of Next should always be checked. This return value
+		// tells us whether there is any kind of event or the cq_ is shutting down.
+		GPR_ASSERT(cq.Next(&got_tag, &ok));
+
+		// Verify that the result from "cq" corresponds, by its tag, our previous
+		// request.
+		GPR_ASSERT(got_tag == (void * ) 1);
+		GPR_ASSERT(ok);
+
+		returned[reply.id()] = true;
+
+		if(debug_level > 1)
+			cout << "Master run reduce got " << reply.id() << endl;
+	}
+
 	return true;
 }
