@@ -13,6 +13,8 @@ message WorkerQuery{
     string output = 4;
     repeated WorkerShard shards = 5;
     int32 workerid = 6;
+    repeated int32 reducerids = 7;
+    repeated int32 succeededIds = 8;
 }
 
 message WorkerShard{

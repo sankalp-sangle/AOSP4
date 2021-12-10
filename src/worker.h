@@ -72,6 +72,7 @@ private:
 			auto mapper = get_mapper_from_task_factory(request_.userid());
 			mapper->impl_->n_output_files = request_.n();
 			mapper->impl_->output_dir = request_.output();
+			mapper->impl_->mapper_id = request_.workerid();
 
 			if(debug_level > 1)
 				cout << server_address << " " << "HandleMap mapper received" << endl;
@@ -124,43 +125,45 @@ private:
 			if(debug_level > 1)
 				cout << server_address << " " << "HandleReduce start" << endl;
 
-			// Get the reducer first
-			auto reducer = get_reducer_from_task_factory(request_.userid());
-			reducer->impl_->output_dir = request_.output();
+			string prefix = "intermediate/map_";
 
-			if(request_.shards().size() == 0)
-				return;
-			
-			for(auto shard : request_.shards()) {
-				string path = shard.path();
-				reducer->impl_->output_file = path;
+			for(auto reducer_id : request_.reducerids()){
+				// Get the reducer first
+				auto reducer = get_reducer_from_task_factory(request_.userid());
+				reducer->impl_->output_dir = request_.output();
+				reducer->impl_->output_file = to_string(reducer_id) + ".txt";
 
 				map<string, vector<string>> key_and_counts;
 
 				if(debug_level > 1)
-					cout << server_address << " " << "HandleReduce shard " << path << endl;
+					cout << server_address << " " << "HandleReduce process outputfile " << reducer->impl_->output_file << endl;
 
-				// Read the file line by line
-				ifstream file(path, ios::in);
+				for(auto succeededID : request_.succeededids()) {
+					string path = prefix + to_string(succeededID) + "_" + to_string(reducer_id) + ".txt";
 
-				if(!file.is_open())
-					cout << server_address << " " << "HandleReduce cant open file" << endl;
-				else {
-					string tmp;
-					while(getline(file, tmp)) {
-						// Split tmp into key and value separated by space
-						string key, value;
-						int pos = tmp.find(" ");
-						key = tmp.substr(0, pos);
-						value = tmp.substr(pos + 1);
-						if(key_and_counts.find(key) == key_and_counts.end()) {
-							key_and_counts[key] = vector<string>();
+					if(debug_level > 1)
+						cout << server_address << " " << "HandleReduce process " << path << endl;
+
+					ifstream file(path, ios::in);
+
+					if(!file.is_open())
+						cout << server_address << " " << "HandleReduce cant open file" << endl;
+					else {
+						string tmp;
+						while(getline(file, tmp)) {
+							// Split tmp into key and value separated by space
+							string key, value;
+							int pos = tmp.find(" ");
+							key = tmp.substr(0, pos);
+							value = tmp.substr(pos + 1);
+							if(key_and_counts.find(key) == key_and_counts.end()) {
+								key_and_counts[key] = vector<string>();
+							}
+							key_and_counts[key].push_back(value);
 						}
-						key_and_counts[key].push_back(value);
 					}
+					file.close();
 				}
-
-				file.close();
 
 				// For all the keys, call the reducer
 				for(auto key_and_count : key_and_counts) {
@@ -169,7 +172,6 @@ private:
 					reducer->reduce(key, counts);
 				}
 			}
-
 		}
 
 		void Proceed() {

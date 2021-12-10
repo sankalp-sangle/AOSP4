@@ -55,7 +55,7 @@ private:
 	unordered_map<string, FileShard> shard_mapping;
 	unordered_map<string, unique_ptr < WorkerService::Stub > > stub_mapping;
 	unordered_map<int, vector<FileInfo>> id_to_shards;
-	unordered_map<int, vector<string>> id_to_intermediate_files;
+	unordered_map<int, vector<int>> worker_id_to_reducer_id;
 
 	bool map();
 	bool reduce();
@@ -227,10 +227,10 @@ bool Master::reduce(){
 
 	int worker_pointer = 0;
 	for(int i = 0; i < n_output_files; i++) {
-		if(id_to_intermediate_files.find(worker_pointer) == id_to_intermediate_files.end())
-			id_to_intermediate_files[worker_pointer] = vector<string>();
+		if(worker_id_to_reducer_id.find(worker_pointer) == worker_id_to_reducer_id.end())
+			worker_id_to_reducer_id[worker_pointer] = vector<int>();
 
-		id_to_intermediate_files[worker_pointer].push_back("intermediate/" + to_string(i) + ".txt");
+		worker_id_to_reducer_id[worker_pointer].push_back(i);
 		worker_pointer = (worker_pointer + 1) % n_workers;
 	}
 
@@ -247,9 +247,11 @@ bool Master::reduce(){
 	// Storage for the status of the RPC upon completion.
 	vector<Status> status_array(n_workers);
 
-	for(auto it = id_to_intermediate_files.begin(); it != id_to_intermediate_files.end(); it++) {
+	for(auto it = worker_id_to_reducer_id.begin(); it != worker_id_to_reducer_id.end(); it++){
+		int i = it->first;
+
 		if(debug_level > 1)
-			cout << "Master reduce map start " << it->first << endl;
+			cout << "Master reduce map start " << i << endl;
 		
 		ClientContext context;
 		context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(15000));
@@ -259,25 +261,26 @@ bool Master::reduce(){
 		worker_query.set_userid(mr_spec_.user_id);
 		worker_query.set_n(n_output_files);
 		worker_query.set_output(mr_spec_.output_dir);
-		worker_query.set_workerid(it->first);
+		worker_query.set_workerid(i);
+		
+		for(auto reducer_id : it->second)
+			worker_query.add_reducerids(reducer_id);
 
 		if(debug_level > 1)
-			cout << "Master run reduce created query " << it->first << endl;
+			cout << "Master run reduce created query " << i << endl;
 
-		for(auto file : it->second) {
-			WorkerShard* worker_shard = worker_query.add_shards();
-			worker_shard->set_path(file);
-		}
+		for(int i = 0; i < n_workers; i++)
+			worker_query.add_succeededids(i);
 
 		if(debug_level > 1)
-			cout << "Master run reduce starting rpc " << it->first << endl;
+			cout << "Master run reduce starting rpc " << i << endl;
 
 		// stub_->PrepareAsyncSayHello() creates an RPC object, returning
 		// an instance to store in "call" but does not actually start the RPC
 		// Because we are using the asynchronous API, we need to hold on to
 		// the "call" instance in order to get updates on the ongoing RPC.
 		std::unique_ptr < ClientAsyncResponseReader < WorkerResponse > > rpc(
-			stub_mapping[mr_spec_.worker_IPs[it->first]] -> PrepareAsyncassignTask( & context, worker_query, & cq));
+			stub_mapping[mr_spec_.worker_IPs[i]] -> PrepareAsyncassignTask( & context, worker_query, & cq));
 
 		// StartCall initiates the RPC call
 		rpc -> StartCall();
@@ -285,18 +288,20 @@ bool Master::reduce(){
 		// Request that, upon completion of the RPC, "reply" be updated with the
 		// server's response; "status" with the indication of whether the operation
 		// was successful. Tag the request with the integer 1.
-		rpc -> Finish( & reply, & status_array[it->first], (void * ) it->first);
+		rpc -> Finish( & reply, & status_array[i], (void * ) i);
 
 		if(debug_level > 1)
-			cout << "Master run reduce wait " << it->first << endl;
+			cout << "Master run reduce wait " << i << endl;
 	}
 	
 	// Something store here
 	vector<bool> returned(mr_spec_.worker_IPs.size(), false);
 
-	for(auto it = id_to_intermediate_files.begin(); it != id_to_intermediate_files.end(); it++){
+	for(auto it = id_to_shards.begin(); it != id_to_shards.end(); it++) {
+		int i = it->first;
+
 		if(debug_level > 1)
-			cout << "Master run reduce reply wait " << it->first << endl;
+			cout << "Master run reduce reply wait " << i << endl;
 
 		void* got_tag;
 		bool ok = false;
