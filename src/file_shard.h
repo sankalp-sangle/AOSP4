@@ -42,7 +42,7 @@ inline bool shard_files(const MapReduceSpec& mr_spec, std::vector<FileShard>& fi
           cout << "File: " << file << " Size: " << st.st_size << endl;
      }
 
-     int total_shards = (int)ceil(total_size / ((double) mr_spec.map_kilobytes * 1000));
+     int total_shards = (int)ceil( (double)total_size / ((double) mr_spec.map_kilobytes * 1000));
      cout << "Total shards: " << total_shards << endl;
      
      // Where we are in the sharding process can be defined by file_index and start offset in the file
@@ -69,6 +69,7 @@ inline bool shard_files(const MapReduceSpec& mr_spec, std::vector<FileShard>& fi
                while(getline(input_file, line)) {
                     read_size += (line.size() + 1);
                     if(read_size >= mr_spec.map_kilobytes * 1000) {
+                         current_offset += line.size() + 1;
                          file_shard.file_info.push_back({file, start_offset, current_offset-1});
                          // Shard Limit reached but not at end of file
                          start_offset = current_offset;
