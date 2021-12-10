@@ -78,7 +78,7 @@ inline void BaseReducerInternal::emit(const std::string& key, const std::string&
 	size_t last_slash = output_file.find_last_of("/");
 	string output_filename = output_file.substr(last_slash + 1);
 
-	outfile.open(output_dir + "/" + output_filename + ".txt", ios_base::app);
+	outfile.open(output_dir + "/" + output_filename, ios_base::app);
 	outfile << key << " " << val << endl;
 	outfile.close();
 }

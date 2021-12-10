@@ -135,7 +135,7 @@ private:
 				string path = shard.path();
 				reducer->impl_->output_file = path;
 
-				unordered_map<string, vector<string>> key_and_counts;
+				map<string, vector<string>> key_and_counts;
 
 				if(debug_level > 1)
 					cout << server_address << " " << "HandleReduce shard " << path << endl;

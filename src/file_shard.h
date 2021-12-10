@@ -69,7 +69,7 @@ inline bool shard_files(const MapReduceSpec& mr_spec, std::vector<FileShard>& fi
                while(getline(input_file, line)) {
                     read_size += (line.size() + 1);
                     if(read_size >= mr_spec.map_kilobytes * 1000) {
-                         file_shard.file_info.push_back({file, start_offset, current_offset});
+                         file_shard.file_info.push_back({file, start_offset, current_offset-1});
                          // Shard Limit reached but not at end of file
                          start_offset = current_offset;
                          file_broken_midway = true;
@@ -80,7 +80,7 @@ inline bool shard_files(const MapReduceSpec& mr_spec, std::vector<FileShard>& fi
                     }
                }
                if(!file_broken_midway) {
-                    file_shard.file_info.push_back({file, start_offset, current_offset});
+                    file_shard.file_info.push_back({file, start_offset, current_offset-1});
                     file_index++;
                     start_offset = 0;
                } else {
