@@ -215,9 +215,6 @@ bool Master::map(){
 		if(debug_level > 1)
 			cout << "Master run map wait " << it->first << endl;
 	}
-	
-	// Something store here
-	vector<bool> returned(mr_spec_.worker_IPs.size(), false);
 
 	int completed_workers = 0;
 
@@ -263,10 +260,9 @@ bool Master::map(){
 			// was successful. Tag the request with the integer 1.
 			rpc -> Finish( & reply, & status_array[next], (void * ) next);
 		} else {
-			completed_workers++;
+			if(worker_id_to_active[parse_tag(got_tag)])
+				completed_workers++;
 		}
-
-		returned[reply.id()] = true;
 
 		if(debug_level > 1)
 			cout << "Master run map got " << reply.id() << endl;
@@ -346,9 +342,6 @@ bool Master::reduce(){
 		if(debug_level > 1)
 			cout << "Master run reduce wait " << i << endl;
 	}
-	
-	// Something store here
-	vector<bool> returned(mr_spec_.worker_IPs.size(), false);
 
 	int completed_workers = 0;
 
@@ -391,10 +384,9 @@ bool Master::reduce(){
 			// was successful. Tag the request with the integer 1.
 			rpc -> Finish( & reply, & status_array[next], (void * ) next);
 		} else {
-			completed_workers++;
+			if(worker_id_to_active[parse_tag(got_tag)])
+				completed_workers++;
 		}
-
-		returned[reply.id()] = true;
 
 		if(debug_level > 1)
 			cout << "Master run reduce got " << reply.id() << endl;
