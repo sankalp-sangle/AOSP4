@@ -59,8 +59,18 @@ private:
 
 	bool map();
 	bool reduce();
+	int parse_tag(void* tag);
 };
 
+
+int Master::parse_tag(void* tag) {
+	for(int i = 0; i < n_workers; i++) {
+		if(tag == (void*)i) {
+			return i;
+		}
+	}
+	return -1;
+}
 
 /* CS6210_TASK: This is all the information your master will get from the framework.
 	You can populate your other class data members here if you want */
@@ -131,13 +141,14 @@ bool Master::map(){
 	WorkerResponse reply;
 	
 	// Storage for the status of the RPC upon completion.
-	Status status;
+	vector<Status> status_array(n_workers);
 
 	for(auto it = id_to_shards.begin(); it != id_to_shards.end(); it++) {
 		if(debug_level > 1)
 			cout << "Master run map start " << it->first << endl;
 		
 		ClientContext context;
+		context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(15000));
 
 		WorkerQuery worker_query;
 		worker_query.set_type("MAP");
@@ -172,7 +183,7 @@ bool Master::map(){
 		// Request that, upon completion of the RPC, "reply" be updated with the
 		// server's response; "status" with the indication of whether the operation
 		// was successful. Tag the request with the integer 1.
-		rpc -> Finish( & reply, & status, (void * ) 1);
+		rpc -> Finish( & reply, & status_array[it->first], (void * ) it->first);
 
 		if(debug_level > 1)
 			cout << "Master run map wait " << it->first << endl;
@@ -194,8 +205,12 @@ bool Master::map(){
 
 		// Verify that the result from "cq" corresponds, by its tag, our previous
 		// request.
-		GPR_ASSERT(got_tag == (void * ) 1);
+		// GPR_ASSERT(got_tag == (void * ) 1);
 		GPR_ASSERT(ok);
+
+		if(!status_array[parse_tag(got_tag)].ok()){
+			cout << "Master run map RPC Failed " << parse_tag(got_tag) << endl;
+		}
 
 		returned[reply.id()] = true;
 
@@ -230,13 +245,14 @@ bool Master::reduce(){
 	WorkerResponse reply;
 	
 	// Storage for the status of the RPC upon completion.
-	Status status;
+	vector<Status> status_array(n_workers);
 
 	for(auto it = id_to_intermediate_files.begin(); it != id_to_intermediate_files.end(); it++) {
 		if(debug_level > 1)
 			cout << "Master reduce map start " << it->first << endl;
 		
 		ClientContext context;
+		context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(15000));
 
 		WorkerQuery worker_query;
 		worker_query.set_type("REDUCE");
@@ -269,7 +285,7 @@ bool Master::reduce(){
 		// Request that, upon completion of the RPC, "reply" be updated with the
 		// server's response; "status" with the indication of whether the operation
 		// was successful. Tag the request with the integer 1.
-		rpc -> Finish( & reply, & status, (void * ) 1);
+		rpc -> Finish( & reply, & status_array[it->first], (void * ) it->first);
 
 		if(debug_level > 1)
 			cout << "Master run reduce wait " << it->first << endl;
@@ -291,8 +307,12 @@ bool Master::reduce(){
 
 		// Verify that the result from "cq" corresponds, by its tag, our previous
 		// request.
-		GPR_ASSERT(got_tag == (void * ) 1);
+		// GPR_ASSERT(got_tag == (void * ) 1);
 		GPR_ASSERT(ok);
+
+		if(!status_array[parse_tag(got_tag)].ok()){
+			cout << "Master run reduce RPC Failed " << parse_tag(got_tag) << endl;
+		}
 
 		returned[reply.id()] = true;
 

@@ -2,7 +2,7 @@ import os
 
 file_names = ['testdata_1.txt', 'testdata_2.txt', 'testdata_3.txt']
 
-DIR = "test/input"
+DIR = "bin/input"
 
 count_of_words = {}
 
