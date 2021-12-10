@@ -56,16 +56,38 @@ private:
 	unordered_map<string, unique_ptr < WorkerService::Stub > > stub_mapping;
 	unordered_map<int, vector<FileInfo>> id_to_shards;
 	unordered_map<int, vector<int>> worker_id_to_reducer_id;
+	unordered_map<int, bool> worker_id_to_active;
 
 	bool map();
 	bool reduce();
 	int parse_tag(void* tag);
+	int get_active_worker();
+	vector<int> get_active_workers();
 };
 
 
 int Master::parse_tag(void* tag) {
 	for(int i = 0; i < n_workers; i++) {
 		if(tag == (void*)i) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+vector<int> Master::get_active_workers() {
+	vector<int> active_workers;
+	for(int i = 0; i < n_workers; i++) {
+		if(worker_id_to_active[i]) {
+			active_workers.push_back(i);
+		}
+	}
+	return active_workers;
+}
+
+int Master::get_active_worker() {
+	for(int i = 0; i < n_workers; i++) {
+		if(worker_id_to_active[i]) {
 			return i;
 		}
 	}
@@ -92,6 +114,9 @@ Master::Master(const MapReduceSpec& mr_spec, const vector<FileShard>& file_shard
 	for(auto it = stub_mapping.begin(); it != stub_mapping.end(); it++){
 		cout << it->first << endl;
 	}
+
+	for(int i = 0; i < n_workers; i++)
+		worker_id_to_active[i] = true;
 
 	system("rm -rf intermediate");
 	system("mkdir intermediate");
@@ -142,6 +167,7 @@ bool Master::map(){
 	
 	// Storage for the status of the RPC upon completion.
 	vector<Status> status_array(n_workers);
+	vector<WorkerQuery> query_array(n_workers);
 
 	for(auto it = id_to_shards.begin(); it != id_to_shards.end(); it++) {
 		if(debug_level > 1)
@@ -150,18 +176,18 @@ bool Master::map(){
 		ClientContext context;
 		context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(15000));
 
-		WorkerQuery worker_query;
-		worker_query.set_type("MAP");
-		worker_query.set_userid(mr_spec_.user_id);
-		worker_query.set_n(n_output_files);
-		worker_query.set_output(mr_spec_.output_dir);
-		worker_query.set_workerid(it->first);
+		// WorkerQuery worker_query;
+		query_array[it->first].set_type("MAP");
+		query_array[it->first].set_userid(mr_spec_.user_id);
+		query_array[it->first].set_n(n_output_files);
+		query_array[it->first].set_output(mr_spec_.output_dir);
+		query_array[it->first].set_workerid(it->first);
 
 		if(debug_level > 1)
 			cout << "Master run map created query " << it->first << endl;
 
 		for(auto file : it->second) {
-			WorkerShard* worker_shard = worker_query.add_shards();
+			WorkerShard* worker_shard = query_array[it->first].add_shards();
 			worker_shard->set_path(file.filename);
 			worker_shard->set_start(file.start_offset);
 			worker_shard->set_end(file.end_offset);
@@ -174,8 +200,9 @@ bool Master::map(){
 		// an instance to store in "call" but does not actually start the RPC
 		// Because we are using the asynchronous API, we need to hold on to
 		// the "call" instance in order to get updates on the ongoing RPC.
+
 		std::unique_ptr < ClientAsyncResponseReader < WorkerResponse > > rpc(
-			stub_mapping[mr_spec_.worker_IPs[it->first]] -> PrepareAsyncassignTask( & context, worker_query, & cq));
+			stub_mapping[mr_spec_.worker_IPs[it->first]] -> PrepareAsyncassignTask( & context, query_array[it->first], & cq));
 
 		// StartCall initiates the RPC call
 		rpc -> StartCall();
@@ -192,9 +219,11 @@ bool Master::map(){
 	// Something store here
 	vector<bool> returned(mr_spec_.worker_IPs.size(), false);
 
-	for(auto it = id_to_shards.begin(); it != id_to_shards.end(); it++){
+	int completed_workers = 0;
+
+	while(completed_workers < n_workers) {
 		if(debug_level > 1)
-			cout << "Master run map reply wait " << it->first << endl;
+			cout << "Master run map number of completed workers" << completed_workers << endl;
 
 		void* got_tag;
 		bool ok = false;
@@ -209,7 +238,32 @@ bool Master::map(){
 		GPR_ASSERT(ok);
 
 		if(!status_array[parse_tag(got_tag)].ok()){
-			cout << "Master run map RPC Failed " << parse_tag(got_tag) << endl;
+			if(debug_level > 1)
+				cout << "Master run map RPC Failed " << parse_tag(got_tag) << endl;
+			worker_id_to_active[parse_tag(got_tag)] = false;
+
+			// Reassign
+			int next = get_active_worker();
+
+			if(debug_level > 1)
+				cout << "Master run map RPC reroute " << parse_tag(got_tag) << " to " << next << endl;
+
+			ClientContext context;
+			context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(15000));
+
+			query_array[parse_tag(got_tag)].set_workerid(next);
+			std::unique_ptr < ClientAsyncResponseReader < WorkerResponse > > rpc(
+			stub_mapping[mr_spec_.worker_IPs[next]] -> PrepareAsyncassignTask( & context, query_array[parse_tag(got_tag)], & cq));
+
+			// StartCall initiates the RPC call
+			rpc -> StartCall();
+
+			// Request that, upon completion of the RPC, "reply" be updated with the
+			// server's response; "status" with the indication of whether the operation
+			// was successful. Tag the request with the integer 1.
+			rpc -> Finish( & reply, & status_array[next], (void * ) next);
+		} else {
+			completed_workers++;
 		}
 
 		returned[reply.id()] = true;
@@ -241,11 +295,11 @@ bool Master::reduce(){
 	// gRPC runtime.
 	CompletionQueue cq;
 
-	// Container for the data we expect from the server.
 	WorkerResponse reply;
-	
+
 	// Storage for the status of the RPC upon completion.
 	vector<Status> status_array(n_workers);
+	vector<WorkerQuery> query_array(n_workers);
 
 	for(auto it = worker_id_to_reducer_id.begin(); it != worker_id_to_reducer_id.end(); it++){
 		int i = it->first;
@@ -256,21 +310,20 @@ bool Master::reduce(){
 		ClientContext context;
 		context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(15000));
 
-		WorkerQuery worker_query;
-		worker_query.set_type("REDUCE");
-		worker_query.set_userid(mr_spec_.user_id);
-		worker_query.set_n(n_output_files);
-		worker_query.set_output(mr_spec_.output_dir);
-		worker_query.set_workerid(i);
+		query_array[it->first].set_type("REDUCE");
+		query_array[it->first].set_userid(mr_spec_.user_id);
+		query_array[it->first].set_n(n_output_files);
+		query_array[it->first].set_output(mr_spec_.output_dir);
+		query_array[it->first].set_workerid(i);
 		
 		for(auto reducer_id : it->second)
-			worker_query.add_reducerids(reducer_id);
+			query_array[it->first].add_reducerids(reducer_id);
 
 		if(debug_level > 1)
 			cout << "Master run reduce created query " << i << endl;
 
-		for(int i = 0; i < n_workers; i++)
-			worker_query.add_succeededids(i);
+		for(auto i : get_active_workers())
+			query_array[it->first].add_succeededids(i);
 
 		if(debug_level > 1)
 			cout << "Master run reduce starting rpc " << i << endl;
@@ -280,7 +333,7 @@ bool Master::reduce(){
 		// Because we are using the asynchronous API, we need to hold on to
 		// the "call" instance in order to get updates on the ongoing RPC.
 		std::unique_ptr < ClientAsyncResponseReader < WorkerResponse > > rpc(
-			stub_mapping[mr_spec_.worker_IPs[i]] -> PrepareAsyncassignTask( & context, worker_query, & cq));
+			stub_mapping[mr_spec_.worker_IPs[i]] -> PrepareAsyncassignTask( & context, query_array[it->first], & cq));
 
 		// StartCall initiates the RPC call
 		rpc -> StartCall();
@@ -297,11 +350,13 @@ bool Master::reduce(){
 	// Something store here
 	vector<bool> returned(mr_spec_.worker_IPs.size(), false);
 
-	for(auto it = id_to_shards.begin(); it != id_to_shards.end(); it++) {
-		int i = it->first;
+	int completed_workers = 0;
 
-		if(debug_level > 1)
-			cout << "Master run reduce reply wait " << i << endl;
+	while(completed_workers < n_workers){
+	// 	int i = it->first;
+
+	// 	if(debug_level > 1)
+	// 		cout << "Master run reduce reply wait " << i << endl;
 
 		void* got_tag;
 		bool ok = false;
@@ -317,6 +372,26 @@ bool Master::reduce(){
 
 		if(!status_array[parse_tag(got_tag)].ok()){
 			cout << "Master run reduce RPC Failed " << parse_tag(got_tag) << endl;
+			worker_id_to_active[parse_tag(got_tag)] = false;
+
+			// Reassign
+			int next = get_active_worker();
+			ClientContext context;
+			context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(15000));
+
+			query_array[parse_tag(got_tag)].set_workerid(next);
+			std::unique_ptr < ClientAsyncResponseReader < WorkerResponse > > rpc(
+			stub_mapping[mr_spec_.worker_IPs[next]] -> PrepareAsyncassignTask( & context, query_array[parse_tag(got_tag)], & cq));
+
+			// StartCall initiates the RPC call
+			rpc -> StartCall();
+
+			// Request that, upon completion of the RPC, "reply" be updated with the
+			// server's response; "status" with the indication of whether the operation
+			// was successful. Tag the request with the integer 1.
+			rpc -> Finish( & reply, & status_array[next], (void * ) next);
+		} else {
+			completed_workers++;
 		}
 
 		returned[reply.id()] = true;
