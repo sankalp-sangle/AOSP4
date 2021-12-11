@@ -9,15 +9,17 @@ Our flow is as follows:
    2. We do an asynchronous gRPC call to all mappers containing information about the shards
    3. A mapper of the id i will create R intermediate files of the form "map_i_k.txt" where k is from 0 to R-1.
    4. A key, value pair is hashed on key to yield a number a between 0 and R-1. This key value pair is put into filename map_i_a.txt. This ensures all occurences of a word go into some file of the form map_*_a.txt
-   5. Thus, in total we create (number of workers * number of expected output files) intermediate files
-   6. If a worker fails (or it is slow), we detect this using gRPC deadlines (timeout). Timeout is empirically taken to be 10 seconds.
-   7. All intermediate files associated with this worker are then ignored by future reducers and the map task of this worker is assigned to another active worker.
-   8. We wait until all map tasks are done
+   5. Thus, in total we create (number of workers * number of expected output files) intermediate files.
+   6. If a worker fails (or fails to reponse within a time), we detect this using gRPC deadlines (timeout). Then the code puts this job to another worker.
+   7. Timeout is empirically taken to be 10 seconds based on the expected linear scan operation.
+   8. All intermediate files associated with this worker are then ignored by future reducers and the map task of this worker is assigned to another active worker.
+   9. We wait until all map tasks are done.
 4. We start the reduce phase:
     1. Every reducer is given a list of workers who have failed.
     2. Every reducer also has a reducer ID id which signifies that it has to read all files of the form "map_*_id.txt" where * is the id of all workers who have NOT failed.
-    3. Now, if a reducer fails, we just send its reduction task to another non-failed receiver.
-    4. In total, R output files are created in accordance to the number given in config.ini
-    5. Each reducer is responsible for creating ONE output file. (NOTE: if a reducer has to take up the reduce task of another reducer which failed, then this statement will not hold)
+    3. Now, if a reducer fails (or fails to respond within a time), we just send its reduce task to another non-failed worker.
+    4. Timeout is empirically taken to be 10 seconds based on the expected linear time operation. (Condering that the logn of the map will be insignificant due to small size of words.)
+    5. In total, R output files are created in accordance to the number given in config.ini
+    6. Each reducer is responsible for creating ONE output file. (NOTE: if a reducer has to take up the reduce task of another reducer which failed, then this statement will not hold)
 5. The master waits for the reduce phase to finish and returns true.
 6. Final output files can be found in the output directory mentioned in config.ini
