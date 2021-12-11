@@ -174,7 +174,7 @@ bool Master::map(){
 			cout << "Master run map start " << it->first << endl;
 		
 		ClientContext context;
-		context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(15000));
+		context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(10000));
 
 		// WorkerQuery worker_query;
 		query_array[it->first].set_type("MAP");
@@ -246,7 +246,7 @@ bool Master::map(){
 				cout << "Master run map RPC reroute " << parse_tag(got_tag) << " to " << next << endl;
 
 			ClientContext context;
-			context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(15000));
+			context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(10000));
 
 			query_array[parse_tag(got_tag)].set_workerid(next);
 			std::unique_ptr < ClientAsyncResponseReader < WorkerResponse > > rpc(
@@ -304,7 +304,7 @@ bool Master::reduce(){
 			cout << "Master reduce map start " << i << endl;
 		
 		ClientContext context;
-		context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(15000));
+		context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(10000));
 
 		query_array[it->first].set_type("REDUCE");
 		query_array[it->first].set_userid(mr_spec_.user_id);
@@ -370,7 +370,7 @@ bool Master::reduce(){
 			// Reassign
 			int next = get_active_worker();
 			ClientContext context;
-			context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(15000));
+			context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(10000));
 
 			query_array[parse_tag(got_tag)].set_workerid(next);
 			std::unique_ptr < ClientAsyncResponseReader < WorkerResponse > > rpc(
