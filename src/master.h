@@ -218,7 +218,7 @@ bool Master::map(){
 
 	int completed_workers = 0;
 
-	while(completed_workers < n_workers) {
+	while(completed_workers < min(n_workers, n_shards)) {
 		if(debug_level > 1)
 			cout << "Master run map number of completed workers" << completed_workers << endl;
 
@@ -345,7 +345,7 @@ bool Master::reduce(){
 
 	int completed_workers = 0;
 
-	while(completed_workers < n_workers){
+	while(completed_workers < min(n_output_files, n_workers)){
 	// 	int i = it->first;
 
 	// 	if(debug_level > 1)
